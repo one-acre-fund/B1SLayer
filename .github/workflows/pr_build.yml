@@ -1,0 +1,89 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ master, 1.X.X, 2.X.X ]
+  pull_request:
+    branches: [ master, 1.X.X, 2.X.X ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    env:
+      config: 'Release'
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+          10.0.x
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration $config --no-restore
+
+# set pr number, if it's a pr build (if pr)
+    - name: set pr build number
+      id: PRNUMBER
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: kkak10/pr-number-action@v1.3
+
+# set report file and title  (if pr)
+    - name: Set Test Title
+      run: |
+           if ${{ github.event_name == 'pull_request' }}
+           then
+            echo "title=Test Run for PR #${{steps.PRNUMBER.outputs.pr}} (${{github.run_number}})" >> $GITHUB_ENV
+            echo "file_name=TestReport.${{steps.PRNUMBER.outputs.pr}}.${{github.run_number}}.md" >> $GITHUB_ENV
+           else
+            echo "title=Test Run ${{github.run_number}}" >> $GITHUB_ENV
+            echo "file_name=TestReport.${{github.run_number}}.md" >> $GITHUB_ENV
+           fi
+
+    - name: Test
+      run: dotnet test B1SLayer.Test/B1SLayer.Test.csproj --configuration $config --no-build --no-restore --logger:"liquid.md;LogFileName=${{github.workspace}}/${{env.file_name}};Title=${{env.title}};" --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+# upload report as build artifact
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v4
+      if: ${{always()}}
+      with:
+        name: 'Test Run'
+        path: ${{github.workspace}}/${{env.file_name}}
+
+# add report as PR comment (if PR)
+    - name: Comment on PR
+      uses: peter-evans/create-or-update-comment@v4
+      if: github.event_name == 'pull_request'
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body-path: ${{ env.file_name }}
+        edit-mode: replace
+
+    - name: Code Coverage Report
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        filename: coverage/**/coverage.cobertura.xml
+        badge: true
+        fail_below_min: true
+        format: markdown
+        hide_branch_rate: false
+        hide_complexity: true
+        indicators: true
+        output: both
+        thresholds: '5 60'
+
+    - name: Add Coverage Comment
+      uses: marocchino/sticky-pull-request-comment@v2
+      if: github.event_name == 'pull_request'
+      with:
+        recreate: true
+        path: code-coverage-results.md
