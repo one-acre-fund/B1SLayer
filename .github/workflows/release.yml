@@ -1,0 +1,74 @@
+name: Release to nuget
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+
+jobs:
+  publish-nuget:
+    runs-on: ubuntu-latest
+    env:
+      config: 'Release'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Determine version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "release" ]; then
+          VERSION="${{ github.event.release.tag_name }}"
+        elif [ "${{ github.event_name }}" = "push" ]; then
+          VERSION="${{ github.ref_name }}"
+        else
+          VERSION="${{ github.event.inputs.version }}"
+        fi
+        # Strip 'v' prefix if present
+        VERSION="${VERSION#v}"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+          10.0.x
+
+    - name: Install dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Test
+      run: dotnet test B1SLayer.Test/B1SLayer.Test.csproj --configuration Release --no-restore --no-build
+
+    - name: Create Nuget Package
+      run: dotnet pack --configuration Release /p:Version=${{ steps.version.outputs.version }} /p:PackageId=OAF.B1SLayer /p:PackageReleaseNotes="See https://github.com/one-acre-fund/B1SLayer/releases/tag/${{ steps.version.outputs.version }}"
+      working-directory: ./B1SLayer
+
+    - name: Archive Nuget Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: OAF.B1SLayer.${{ steps.version.outputs.version }}.nupkg
+        path: ./B1SLayer/bin/Release/OAF.B1SLayer.${{ steps.version.outputs.version }}.nupkg
+
+    - name: Add Azure Artifacts source
+      run: |
+        dotnet nuget add source https://pkgs.dev.azure.com/OAFDev/_packaging/oaf.dev/nuget/v3/index.json \
+          --name OAFArtifacts \
+          --username az \
+          --password ${{ secrets.AZURE_DEVOPS_FEED_ACCESSTOKEN }} \
+          --store-password-in-clear-text
+
+    - name: Publish NuGet Package to Azure Artifacts
+      run: dotnet nuget push **/OAF.B1SLayer.${{ steps.version.outputs.version }}.nupkg --source OAFArtifacts --api-key AzureDevOps --skip-duplicate

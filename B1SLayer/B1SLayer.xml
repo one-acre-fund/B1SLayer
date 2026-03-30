@@ -401,6 +401,12 @@
             The number of attempts is defined by <see cref="P:B1SLayer.SLConnection.NumberOfAttempts"/>.
             </remarks>
         </member>
+        <member name="P:B1SLayer.SLConnection.ConfigureHandler">
+            <summary>
+            Gets or sets an optional action to configure the inner <see cref="T:System.Net.Http.SocketsHttpHandler"/> used by the HTTP client.
+            This can be used to set properties such as <c>PooledConnectionLifetime</c>, <c>PooledConnectionIdleTimeout</c>, and <c>ConnectTimeout</c>.
+            </summary>
+        </member>
         <member name="M:B1SLayer.SLConnection.#ctor(System.Uri,System.String,System.String,System.String,System.Nullable{System.Int32},System.Int32)">
             <summary>
             Initializes a new instance of the <see cref="T:B1SLayer.SLConnection"/> class.

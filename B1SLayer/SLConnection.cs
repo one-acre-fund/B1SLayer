@@ -135,6 +135,14 @@ public class SLConnection
         HttpStatusCode.GatewayTimeout
     ];
 
+#if NET
+    /// <summary>
+    /// Gets or sets an optional action to configure the inner <see cref="SocketsHttpHandler"/> used by the HTTP client.
+    /// This can be used to set properties such as <c>PooledConnectionLifetime</c>, <c>PooledConnectionIdleTimeout</c>, and <c>ConnectTimeout</c>.
+    /// </summary>
+    public Action<SocketsHttpHandler> ConfigureHandler { get; set; }
+#endif
+
     #endregion
 
     #region Constructors
@@ -323,15 +331,26 @@ public class SLConnection
 
     private IFlurlClient BuildFlurlClient()
     {
-        return new FlurlClientBuilder(ServiceLayerRoot.ToString())
+        var builder = new FlurlClientBuilder(ServiceLayerRoot.ToString())
             .ConfigureHttpClient(httpClient =>
             {
                 httpClient.DefaultRequestHeaders.ExpectContinue = false;
-            })
-            .ConfigureInnerHandler(handler =>
-            {
-                handler.ServerCertificateCustomValidationCallback = (a, b, c, d) => true;
-            })
+            });
+
+#if NET
+        builder = builder.UseSocketsHttpHandler(handler =>
+        {
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+            ConfigureHandler?.Invoke(handler);
+        });
+#else
+        builder = builder.ConfigureInnerHandler(handler =>
+        {
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
+        });
+#endif
+
+        return builder
             .WithSettings(settings =>
             {
                 settings.JsonSerializer = new SystemTextJsonSerializer(new JsonSerializerOptions
@@ -609,10 +628,12 @@ public class SLConnection
                 }
 
                 // Whether the request should be retried
-                if (!HttpStatusCodesToRetry.Any(x => x == ex.Call.HttpResponseMessage?.StatusCode))
-                {
+                bool isTransportFailure = ex.Call?.HttpResponseMessage == null;
+                bool isRetryableStatus = ex.StatusCode.HasValue
+                    && HttpStatusCodesToRetry.Contains((HttpStatusCode)ex.StatusCode.Value);
+
+                if (!isTransportFailure && !isRetryableStatus)
                     break;
-                }
 
                 // Forces a new login request in case the response is 401 Unauthorized
                 if (ex.Call.HttpResponseMessage?.StatusCode == HttpStatusCode.Unauthorized)
