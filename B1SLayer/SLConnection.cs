@@ -139,8 +139,19 @@ public class SLConnection
     /// <summary>
     /// Gets or sets an optional action to configure the inner <see cref="SocketsHttpHandler"/> used by the HTTP client.
     /// This can be used to set properties such as <c>PooledConnectionLifetime</c>, <c>PooledConnectionIdleTimeout</c>, and <c>ConnectTimeout</c>.
+    /// Setting this property rebuilds the underlying HTTP client so that the configuration takes effect.
+    /// Must be set before configuring <c>Client.Settings</c> (e.g. JsonSerializer, Timeout).
     /// </summary>
-    public Action<SocketsHttpHandler> ConfigureHandler { get; set; }
+    public Action<SocketsHttpHandler> ConfigureHandler
+    {
+        get => _configureHandler;
+        set
+        {
+            _configureHandler = value;
+            Client = BuildFlurlClient();
+        }
+    }
+    private Action<SocketsHttpHandler> _configureHandler;
 #endif
 
     #endregion
@@ -644,6 +655,18 @@ public class SLConnection
                     await ExecuteLoginAsync();
                     loginReattempted = true;
                 }
+            }
+            catch (SLException slEx) when (slEx.InnerException is FlurlHttpException innerFlurlEx)
+            {
+                exceptions ??= new List<Exception>();
+                exceptions.Add(slEx);
+
+                // Retry login failures (e.g. 500 "SAML Login Failed") that have a retryable status code
+                bool isRetryableLogin = innerFlurlEx.StatusCode.HasValue
+                    && HttpStatusCodesToRetry.Contains((HttpStatusCode)innerFlurlEx.StatusCode.Value);
+
+                if (!isRetryableLogin)
+                    break;
             }
             catch (Exception)
             {
