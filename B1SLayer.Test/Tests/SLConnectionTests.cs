@@ -463,3 +463,123 @@ public class SLConnectionLoginRetryTests : IDisposable
         Assert.NotNull(result);
     }
 }
+
+public class SLConnectionPostRetryTests : IDisposable
+{
+    private readonly HttpTest _httpTest;
+    private static readonly SLLoginResponse _loginResponse = new()
+    {
+        SessionId = "00000000-0000-0000-0000-000000000000",
+        Version = "1000000",
+        SessionTimeout = 30
+    };
+
+    public SLConnectionPostRetryTests()
+    {
+        _httpTest = new HttpTest();
+    }
+
+    public void Dispose()
+    {
+        _httpTest.Dispose();
+    }
+
+    private static SLConnection CreateConnection(int numberOfAttempts = 3)
+    {
+        return new SLConnection(
+            "https://sapserver:50000/b1s/v1", "CompanyDB", "manager", "12345",
+            numberOfAttempts: numberOfAttempts
+        );
+    }
+
+    [Fact]
+    public async Task PostTransportFailure_DoesNotRetry()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        _httpTest.ForCallsTo("*/Login").RespondWithJson(_loginResponse);
+        _httpTest.ForCallsTo("*/Invoices").SimulateTimeout();
+
+        await Assert.ThrowsAsync<FlurlHttpTimeoutException>(
+            () => connection.Request("Invoices").PostAsync<object>(new { })
+        );
+
+        // POST should NOT be retried on transport failure, so only 1 call to Invoices
+        _httpTest.ShouldHaveCalled("*/Invoices").Times(1);
+    }
+
+    [Fact]
+    public async Task PostUnauthorized401_StillRetriesAfterReLogin()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        // Login succeeds on all attempts
+        _httpTest.ForCallsTo("*/Login").RespondWithJson(_loginResponse);
+
+        // 1st POST attempt: 401 (triggers re-login + retry)
+        // 2nd POST attempt: success
+        _httpTest.ForCallsTo("*/Invoices")
+            .RespondWith(status: 401, body: "Unauthorized")
+            .RespondWith("""{"DocEntry": 1}""");
+
+        var result = await connection.Request("Invoices").PostAsync<object>(new { });
+
+        // Should have retried after re-login on 401
+        Assert.NotNull(result);
+        _httpTest.ShouldHaveCalled("*/Invoices").Times(2);
+    }
+
+    [Fact]
+    public async Task GetTransportFailure_StillRetries()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        _httpTest.ForCallsTo("*/Login").RespondWithJson(_loginResponse);
+
+        // 1st GET attempt: timeout, 2nd: success
+        _httpTest.ForCallsTo("*/Orders")
+            .SimulateTimeout()
+            .RespondWith("{}");
+
+        var result = await connection.Request("Orders").GetAsync<object>();
+
+        Assert.NotNull(result);
+        // GET should still be retried on transport failure
+        _httpTest.ShouldHaveCalled("*/Orders").Times(2);
+    }
+
+    [Fact]
+    public async Task PatchTransportFailure_DoesNotRetry()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        _httpTest.ForCallsTo("*/Login").RespondWithJson(_loginResponse);
+        _httpTest.ForCallsTo("*/Orders(1)").SimulateTimeout();
+
+        await Assert.ThrowsAsync<FlurlHttpTimeoutException>(
+            () => connection.Request("Orders", 1).PatchAsync(new { })
+        );
+
+        _httpTest.ShouldHaveCalled("*/Orders(1)").Times(1);
+    }
+
+    [Fact]
+    public async Task Unauthorized401_InvalidatesCacheAndReLogins_ThenSucceeds()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        _httpTest.ForCallsTo("*/Login").RespondWithJson(_loginResponse);
+
+        // 1st attempt: 401, triggers cache invalidation + re-login
+        // 2nd attempt: success
+        _httpTest.ForCallsTo("*/Orders")
+            .RespondWith(status: 401, body: "Unauthorized")
+            .RespondWith("{}");
+
+        var result = await connection.Request("Orders").GetAsync<object>();
+        Assert.NotNull(result);
+
+        // Should have called Orders twice (initial 401 + successful retry)
+        _httpTest.ShouldHaveCalled("*/Orders").Times(2);
+    }
+}
