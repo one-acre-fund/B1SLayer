@@ -643,9 +643,12 @@ public class SLConnection
                 bool isRetryableStatus = ex.StatusCode.HasValue
                     && HttpStatusCodesToRetry.Contains((HttpStatusCode)ex.StatusCode.Value);
 
+                // Login transport failures are always retryable since no mutation was sent yet
+                bool isLoginFailure = ex.Call?.Request?.Url?.Path?.EndsWith("/Login") == true;
+
                 // Skip retry on transport failure for non-idempotent requests (e.g. POST)
                 // to avoid duplicates when the server may have already processed the request
-                if (isTransportFailure && !retryOnTransportFailure)
+                if (isTransportFailure && !retryOnTransportFailure && !isLoginFailure)
                     break;
 
                 if (!isTransportFailure && !isRetryableStatus)
@@ -945,7 +948,7 @@ public class SLConnection
                 .ReceiveJson<SLAttachment>();
 
             return result;
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -1048,7 +1051,7 @@ public class SLConnection
                 });
 
             return result;
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -1134,15 +1137,18 @@ public class SLConnection
     /// </returns>
     public async Task<HttpResponseMessage[]> PostBatchAsync(IEnumerable<SLBatchRequest> requests, bool singleChangeSet = true)
     {
+        var slBatchRequests = requests?.ToList()
+            ?? throw new ArgumentNullException(nameof(requests));
+
+        if (slBatchRequests.Count == 0)
+            throw new ArgumentException("No requests to be sent.", nameof(requests));
+
+        // Only safe to retry on transport failure if every request in the batch is a read
+        bool isReadOnlyBatch = slBatchRequests.All(r =>
+            r.HttpMethod == HttpMethod.Get || r.HttpMethod == HttpMethod.Head);
+
         return await ExecuteRequest(async () =>
         {
-            if (requests == null)
-                throw new ArgumentNullException(nameof(requests));
-
-            var slBatchRequests = requests.ToList();
-            if (slBatchRequests.Count == 0)
-                throw new ArgumentException("No requests to be sent.", nameof(requests));
-
             var batchContents = await BuildBatchContentsAsync(slBatchRequests, singleChangeSet);
 
             var flurlResponse = await Client
@@ -1165,7 +1171,7 @@ public class SLConnection
 
             var responses = await MultipartHelper.ReadMultipartResponseAsync(batchResponse);
             return responses;
-        });
+        }, retryOnTransportFailure: isReadOnlyBatch);
     }
 
     /// <summary>
