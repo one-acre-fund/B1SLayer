@@ -604,7 +604,7 @@ public class SLConnection
     /// If the request is unsuccessfull with any return code present in <see cref="HttpStatusCodesToRetry"/>, 
     /// it will be retried for <see cref="NumberOfAttempts"/> number of times.
     /// </summary>
-    internal async Task<T> ExecuteRequest<T>(Func<Task<T>> action)
+    internal async Task<T> ExecuteRequest<T>(Func<Task<T>> action, bool retryOnTransportFailure = true)
     {
         bool loginReattempted = false;
         List<Exception> exceptions = null;
@@ -643,6 +643,11 @@ public class SLConnection
                 bool isRetryableStatus = ex.StatusCode.HasValue
                     && HttpStatusCodesToRetry.Contains((HttpStatusCode)ex.StatusCode.Value);
 
+                // Skip retry on transport failure for non-idempotent requests (e.g. POST)
+                // to avoid duplicates when the server may have already processed the request
+                if (isTransportFailure && !retryOnTransportFailure)
+                    break;
+
                 if (!isTransportFailure && !isRetryableStatus)
                     break;
 
@@ -652,6 +657,7 @@ public class SLConnection
                     if (i >= NumberOfAttempts)
                         break;
 
+                    await InvalidateSessionCacheAsync();
                     await ExecuteLoginAsync();
                     loginReattempted = true;
                 }

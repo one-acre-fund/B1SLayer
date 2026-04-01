@@ -248,7 +248,7 @@ public class SLRequest
             bool hasValueToken = root.TryGetProperty("value", out JsonElement valueCollection);
             string jsonToDeserialize = (unwrapCollection && hasValueToken) ? valueCollection.GetRawText() : root.GetRawText();
             return JsonSerializer.Deserialize<T>(jsonToDeserialize);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -280,7 +280,7 @@ public class SLRequest
             bool hasValueToken = root.TryGetProperty("value", out JsonElement valueCollection);
             string jsonToDeserialize = (unwrapCollection && hasValueToken) ? valueCollection.GetRawText() : root.GetRawText();
             return JsonSerializer.Deserialize<T>(jsonToDeserialize);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -309,7 +309,7 @@ public class SLRequest
             bool hasValueToken = root.TryGetProperty("value", out JsonElement valueCollection);
             string jsonToDeserialize = (unwrapCollection && hasValueToken) ? valueCollection.GetRawText() : root.GetRawText();
             return JsonSerializer.Deserialize<T>(jsonToDeserialize);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -323,7 +323,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PostJsonAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -334,7 +334,7 @@ public class SLRequest
         return await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PostAsync().ReceiveString();
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -348,7 +348,7 @@ public class SLRequest
         return await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PostJsonAsync(data).ReceiveString();
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -362,7 +362,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PostStringAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -373,7 +373,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PostAsync();
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -387,7 +387,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PatchJsonAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -401,7 +401,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PatchStringAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -449,7 +449,7 @@ public class SLRequest
                 content.Headers.Add("Content-Type", "application/octet-stream");
                 mp.Add(content);
             });
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -463,7 +463,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PutJsonAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
@@ -477,7 +477,7 @@ public class SLRequest
         await _slConnection.ExecuteRequest(async () =>
         {
             return await FlurlRequest.WithCookies(await _slConnection.GetSessionCookiesAsync()).PutStringAsync(data);
-        });
+        }, retryOnTransportFailure: false);
     }
 
     /// <summary>
