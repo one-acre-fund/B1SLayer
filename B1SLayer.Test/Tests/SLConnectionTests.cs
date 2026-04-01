@@ -1,5 +1,7 @@
 using Flurl.Http;
 using Flurl.Http.Testing;
+using Microsoft.Extensions.Caching.Distributed;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 
@@ -302,10 +304,12 @@ public class SLConnectionLoginRetryTests : IDisposable
 
     private static SLConnection CreateConnection(int numberOfAttempts = 3)
     {
-        return new SLConnection(
+        var connection = new SLConnection(
             "https://sapserver:50000/b1s/v1", "CompanyDB", "manager", "12345",
             numberOfAttempts: numberOfAttempts
         );
+        connection.SessionCacheKey = $"B1SLayer:Test:{Guid.NewGuid()}";
+        return connection;
     }
 
     [Fact]
@@ -486,10 +490,12 @@ public class SLConnectionPostRetryTests : IDisposable
 
     private static SLConnection CreateConnection(int numberOfAttempts = 3)
     {
-        return new SLConnection(
+        var connection = new SLConnection(
             "https://sapserver:50000/b1s/v1", "CompanyDB", "manager", "12345",
             numberOfAttempts: numberOfAttempts
         );
+        connection.SessionCacheKey = $"B1SLayer:Test:{Guid.NewGuid()}";
+        return connection;
     }
 
     [Fact]
@@ -524,9 +530,12 @@ public class SLConnectionPostRetryTests : IDisposable
 
         var result = await connection.Request("Invoices").PostAsync<object>(new { });
 
-        // Should have retried after re-login on 401
         Assert.NotNull(result);
         _httpTest.ShouldHaveCalled("*/Invoices").Times(2);
+
+        // Verify a re-login actually happened (initial login + re-login after 401)
+        var loginCalls = _httpTest.CallLog.Count(c => c.Request.Url.Path.EndsWith("/Login"));
+        Assert.True(loginCalls >= 2, $"Expected at least 2 Login calls (initial + re-login on 401), but got {loginCalls}");
     }
 
     [Fact]
@@ -564,6 +573,31 @@ public class SLConnectionPostRetryTests : IDisposable
     }
 
     [Fact]
+    public async Task PostLoginTransportFailure_StillRetries()
+    {
+        var connection = CreateConnection(numberOfAttempts: 3);
+
+        // 1st login attempt: timeout (transport failure)
+        // 2nd login attempt: succeeds
+        _httpTest.ForCallsTo("*/Login")
+            .SimulateTimeout()
+            .RespondWithJson(_loginResponse);
+
+        _httpTest.ForCallsTo("*/Invoices")
+            .RespondWith("""{"DocEntry": 1}""");
+
+        // Even though POST has retryOnTransportFailure: false,
+        // a login timeout should still be retried since no mutation was sent
+        var result = await connection.Request("Invoices").PostAsync<object>(new { });
+        Assert.NotNull(result);
+
+        // Login was called twice (timeout + success), Invoices called once
+        var loginCalls = _httpTest.CallLog.Count(c => c.Request.Url.Path.EndsWith("/Login"));
+        Assert.Equal(2, loginCalls);
+        _httpTest.ShouldHaveCalled("*/Invoices").Times(1);
+    }
+
+    [Fact]
     public async Task Unauthorized401_InvalidatesCacheAndReLogins_ThenSucceeds()
     {
         var connection = CreateConnection(numberOfAttempts: 3);
@@ -576,10 +610,31 @@ public class SLConnectionPostRetryTests : IDisposable
             .RespondWith(status: 401, body: "Unauthorized")
             .RespondWith("{}");
 
+        // Seed the cache with a stale session so we can verify it gets invalidated
+        await connection.DistributedCache.SetStringAsync(
+            connection.SessionCacheKey,
+            "B1SESSION=stale-session-id; ROUTEID=.node0"
+        );
+
+        // Confirm stale entry is present before the request
+        var before = await connection.DistributedCache.GetStringAsync(connection.SessionCacheKey);
+        Assert.Contains("stale-session-id", before);
+
         var result = await connection.Request("Orders").GetAsync<object>();
         Assert.NotNull(result);
 
-        // Should have called Orders twice (initial 401 + successful retry)
         _httpTest.ShouldHaveCalled("*/Orders").Times(2);
+
+        // Verify re-login happened after the 401
+        var loginCalls = _httpTest.CallLog.Count(c => c.Request.Url.Path.EndsWith("/Login"));
+        Assert.True(loginCalls >= 1, $"Expected at least 1 re-login after 401, but got {loginCalls}");
+
+        // The stale cache entry must have been invalidated.
+        // If InvalidateSessionCacheAsync was skipped, the cache would still hold "stale-session-id".
+        var after = await connection.DistributedCache.GetStringAsync(connection.SessionCacheKey);
+        Assert.True(
+            after == null || !after.Contains("stale-session-id"),
+            "Stale session cookies should have been invalidated from cache on 401"
+        );
     }
 }
