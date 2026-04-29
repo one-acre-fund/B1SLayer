@@ -162,4 +162,38 @@ public class SLBatchRequestTests : TestBase
             })
             .Times(1);
     }
+
+    [Theory]
+    [MemberData(nameof(SLConnections))]
+    public async Task PostBatchAsync_ContinueOnErrorTrue_SendsPreferHeader(SLConnection connection)
+    {
+        HttpTest.RespondWith(
+            body: v2Response,
+            status: 202,
+            headers: new Dictionary<string, string> { { "Content-Type", "multipart/mixed;boundary=batchresponse_00000000-0000-0000-0000-000000000000" } });
+
+        await connection.PostBatchAsync(_requests, singleChangeSet: true, continueOnError: true);
+
+        HttpTest.ShouldHaveCalled(connection.ServiceLayerRoot.AppendPathSegment("$batch"))
+            .WithVerb(HttpMethod.Post)
+            .WithHeader("Prefer", "odata.continue-on-error")
+            .Times(1);
+    }
+
+    [Theory]
+    [MemberData(nameof(SLConnections))]
+    public async Task PostBatchAsync_ContinueOnErrorFalse_OmitsPreferHeader(SLConnection connection)
+    {
+        HttpTest.RespondWith(
+            body: v2Response,
+            status: 202,
+            headers: new Dictionary<string, string> { { "Content-Type", "multipart/mixed;boundary=batchresponse_00000000-0000-0000-0000-000000000000" } });
+
+        await connection.PostBatchAsync(_requests);
+
+        HttpTest.ShouldHaveCalled(connection.ServiceLayerRoot.AppendPathSegment("$batch"))
+            .WithVerb(HttpMethod.Post)
+            .WithoutHeader("Prefer")
+            .Times(1);
+    }
 }
