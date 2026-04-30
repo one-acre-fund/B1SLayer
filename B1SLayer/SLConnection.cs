@@ -1122,7 +1122,7 @@ public class SLConnection
     }
 
     /// <summary>
-    /// Sends a batch request (multiple operations sent in a single HTTP request) with the provided <see cref="SLBatchRequest"/> collection. 
+    /// Sends a batch request (multiple operations sent in a single HTTP request) with the provided <see cref="SLBatchRequest"/> collection.
     /// </summary>
     /// <remarks>
     /// See section 'Batch Operations' in the Service Layer User Manual for more details.
@@ -1132,10 +1132,16 @@ public class SLConnection
     /// <param name="singleChangeSet">
     /// Whether all the requests in this batch should be sent in a single change set. This means that any unsuccessful request will cause the whole batch to be rolled back.
     /// </param>
+    /// <param name="continueOnError">
+    /// If <c>true</c>, sends the <c>Prefer: odata.continue-on-error</c> header so the Service Layer continues processing remaining requests after one fails instead of aborting the batch.
+    /// </param>
     /// <returns>
-    /// An <see cref="HttpResponseMessage"/> array containg the response messages of the batch request. 
+    /// An <see cref="HttpResponseMessage"/> array containg the response messages of the batch request.
     /// </returns>
-    public async Task<HttpResponseMessage[]> PostBatchAsync(IEnumerable<SLBatchRequest> requests, bool singleChangeSet = true)
+    public async Task<HttpResponseMessage[]> PostBatchAsync(
+        IEnumerable<SLBatchRequest> requests,
+        bool singleChangeSet = true,
+        bool continueOnError = false)
     {
         var slBatchRequests = requests?.ToList()
             ?? throw new ArgumentNullException(nameof(requests));
@@ -1151,18 +1157,24 @@ public class SLConnection
         {
             var batchContents = await BuildBatchContentsAsync(slBatchRequests, singleChangeSet);
 
-            var flurlResponse = await Client
+            var batchRequest = Client
                 .Request("$batch")
                 .WithCookies(await GetSessionCookiesAsync())
-                .WithTimeout(BatchRequestTimeout)
-                .PostMultipartAsync(mp =>
+                .WithTimeout(BatchRequestTimeout);
+
+            if (continueOnError)
+            {
+                batchRequest = batchRequest.WithHeader("Prefer", "odata.continue-on-error");
+            }
+
+            var flurlResponse = await batchRequest.PostMultipartAsync(mp =>
+            {
+                mp.Headers.ContentType.MediaType = "multipart/mixed";
+                foreach (var content in batchContents)
                 {
-                    mp.Headers.ContentType.MediaType = "multipart/mixed";
-                    foreach (var content in batchContents)
-                    {
-                        mp.Add(content);
-                    }
-                });
+                    mp.Add(content);
+                }
+            });
 
             var batchResponse = flurlResponse.ResponseMessage;
 
