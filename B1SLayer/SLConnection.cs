@@ -1135,13 +1135,17 @@ public class SLConnection
     /// <param name="continueOnError">
     /// If <c>true</c>, sends the <c>Prefer: odata.continue-on-error</c> header so the Service Layer continues processing remaining requests after one fails instead of aborting the batch.
     /// </param>
+    /// <param name="logRawPayload">
+    /// Optional callback invoked twice per call when set: once with <see cref="SLBatchPayloadKind.Request"/> and the raw outgoing multipart body, then with <see cref="SLBatchPayloadKind.Response"/> and the raw incoming multipart body. Pass <c>null</c> (the default) to disable wire logging.
+    /// </param>
     /// <returns>
     /// An <see cref="HttpResponseMessage"/> array containg the response messages of the batch request.
     /// </returns>
     public async Task<HttpResponseMessage[]> PostBatchAsync(
         IEnumerable<SLBatchRequest> requests,
         bool singleChangeSet = true,
-        bool continueOnError = false)
+        bool continueOnError = false,
+        Action<SLBatchPayloadKind, string> logRawPayload = null)
     {
         var slBatchRequests = requests?.ToList()
             ?? throw new ArgumentNullException(nameof(requests));
@@ -1167,6 +1171,11 @@ public class SLConnection
                 batchRequest = batchRequest.WithHeader("Prefer", "odata.continue-on-error");
             }
 
+            if (logRawPayload != null)
+            {
+                AttachBatchPayloadLogging(batchRequest, logRawPayload);
+            }
+
             var flurlResponse = await batchRequest.PostMultipartAsync(mp =>
             {
                 mp.Headers.ContentType.MediaType = "multipart/mixed";
@@ -1184,6 +1193,36 @@ public class SLConnection
             var responses = await MultipartHelper.ReadMultipartResponseAsync(batchResponse);
             return responses;
         }, retryOnTransportFailure: isReadOnlyBatch);
+    }
+
+    /// <summary>
+    /// Attaches per-request <c>BeforeCall</c>/<c>AfterCall</c> hooks that read the raw multipart bodies
+    /// and forward them to the caller-supplied <paramref name="log"/> callback. The hooks are scoped to
+    /// this <see cref="IFlurlRequest"/> instance only, so they go away once
+    /// <see cref="PostBatchAsync(IEnumerable{SLBatchRequest}, bool, bool, Action{SLBatchPayloadKind, string})"/>
+    /// returns and the request is discarded — no global pipeline state is left behind.
+    /// </summary>
+    private static void AttachBatchPayloadLogging(
+        IFlurlRequest batchRequest,
+        Action<SLBatchPayloadKind, string> log)
+    {
+        batchRequest
+            .BeforeCall(async call =>
+            {
+                if (call?.HttpRequestMessage?.Content is null) return;
+                // Buffer so the actual send still has a readable body.
+                await call.HttpRequestMessage.Content.LoadIntoBufferAsync();
+                var body = await call.HttpRequestMessage.Content.ReadAsStringAsync();
+                log(SLBatchPayloadKind.Request, body);
+            })
+            .AfterCall(async call =>
+            {
+                if (call?.HttpResponseMessage?.Content is null) return;
+                // Buffer so MultipartHelper.ReadMultipartResponseAsync still gets a readable body.
+                await call.HttpResponseMessage.Content.LoadIntoBufferAsync();
+                var body = await call.HttpResponseMessage.Content.ReadAsStringAsync();
+                log(SLBatchPayloadKind.Response, body);
+            });
     }
 
     /// <summary>

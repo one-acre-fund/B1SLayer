@@ -196,4 +196,62 @@ public class SLBatchRequestTests : TestBase
             .WithoutHeader("Prefer")
             .Times(1);
     }
+
+    [Theory]
+    [MemberData(nameof(SLConnections))]
+    public async Task PostBatchAsync_LogRawPayloadCallback_InvokedWithRequestThenResponse(SLConnection connection)
+    {
+        HttpTest.RespondWith(
+            body: v2Response,
+            status: 202,
+            headers: new Dictionary<string, string> { { "Content-Type", "multipart/mixed;boundary=batchresponse_00000000-0000-0000-0000-000000000000" } });
+
+        var entries = new List<(SLBatchPayloadKind kind, string body)>();
+        void Log(SLBatchPayloadKind kind, string body) => entries.Add((kind, body));
+
+        await connection.PostBatchAsync(_requests, logRawPayload: Log);
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(SLBatchPayloadKind.Request, entries[0].kind);
+        Assert.Equal(SLBatchPayloadKind.Response, entries[1].kind);
+        // Request body is the outgoing multipart, includes a serialized sub-request
+        Assert.Contains("BusinessPartners", entries[0].body);
+        Assert.Contains("C00001", entries[0].body);
+        // Response body is the raw multipart envelope returned by SAP
+        Assert.Equal(v2Response, entries[1].body);
+    }
+
+    [Theory]
+    [MemberData(nameof(SLConnections))]
+    public async Task PostBatchAsync_LogRawPayloadCallback_DoesNotConsumeResponseBody(SLConnection connection)
+    {
+        HttpTest.RespondWith(
+            body: v2Response,
+            status: 202,
+            headers: new Dictionary<string, string> { { "Content-Type", "multipart/mixed;boundary=batchresponse_00000000-0000-0000-0000-000000000000" } });
+
+        var batchResult = await connection.PostBatchAsync(
+            _requests,
+            logRawPayload: (_, _) => { });
+
+        // MultipartHelper still parses the response after the AfterCall hook ran.
+        Assert.Equal(3, batchResult.Length);
+        Assert.Equal(HttpStatusCode.Created, batchResult[0].StatusCode);
+        Assert.Equal("{\"some\":\"content\"}", await batchResult[0].Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(SLConnections))]
+    public async Task PostBatchAsync_LogRawPayloadNull_CallbackNotInvoked(SLConnection connection)
+    {
+        HttpTest.RespondWith(
+            body: v2Response,
+            status: 202,
+            headers: new Dictionary<string, string> { { "Content-Type", "multipart/mixed;boundary=batchresponse_00000000-0000-0000-0000-000000000000" } });
+
+        // Sanity: passing null (the default) must not throw and must not affect the result.
+        var batchResult = await connection.PostBatchAsync(_requests, logRawPayload: null);
+
+        Assert.Equal(3, batchResult.Length);
+    }
 }
