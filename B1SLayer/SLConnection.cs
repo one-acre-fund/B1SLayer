@@ -1208,7 +1208,7 @@ public class SLConnection
         batchRequest
             .BeforeCall(async call =>
             {
-                if (call.HttpRequestMessage?.Content is null) return;
+                if (call?.HttpRequestMessage?.Content is null) return;
                 // Buffer so the actual send still has a readable body.
                 await call.HttpRequestMessage.Content.LoadIntoBufferAsync();
                 var body = await call.HttpRequestMessage.Content.ReadAsStringAsync();
@@ -1216,7 +1216,7 @@ public class SLConnection
             })
             .AfterCall(async call =>
             {
-                if (call.HttpResponseMessage?.Content is null) return;
+                if (call?.HttpResponseMessage?.Content is null) return;
                 // Buffer so MultipartHelper.ReadMultipartResponseAsync still gets a readable body.
                 await call.HttpResponseMessage.Content.LoadIntoBufferAsync();
                 var body = await call.HttpResponseMessage.Content.ReadAsStringAsync();
