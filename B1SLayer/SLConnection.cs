@@ -1198,7 +1198,8 @@ public class SLConnection
     /// <summary>
     /// Attaches per-request <c>BeforeCall</c>/<c>AfterCall</c> hooks that read the raw multipart bodies
     /// and forward them to the caller-supplied <paramref name="log"/> callback. The hooks are scoped to
-    /// this <see cref="IFlurlRequest"/> instance only, so they go away once <see cref="PostBatchAsync"/>
+    /// this <see cref="IFlurlRequest"/> instance only, so they go away once
+    /// <see cref="PostBatchAsync(IEnumerable{SLBatchRequest}, bool, bool, Action{SLBatchPayloadKind, string})"/>
     /// returns and the request is discarded — no global pipeline state is left behind.
     /// </summary>
     private static void AttachBatchPayloadLogging(
